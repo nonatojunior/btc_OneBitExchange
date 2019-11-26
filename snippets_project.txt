@@ -1,0 +1,725 @@
+-Planejamento + Preparação (Planejando e preparando o projeto):
+  Definição da ideia:
+    Realiza a conversão de uma quantidade X de uma moeda (exp BRL) em uma quantidade Y correspondente de outra (exp EUR).
+  Stack do Projeto:
+    Desenvolvimento
+    Docker
+    Docker-compose
+    Ruby + Ruby On Rails
+      gem rest-client
+      gem webmock
+    Yarn
+    PostgreSql
+    Deploy
+      Codeship
+      Heroku
+  Mockup:
+    https://onebitcode.com/wp-content/uploads/2018/06/mockup-onebitexchange.png
+
+-Gerando e dockerizando o projeto:
+  1 - Vamos criar nosso projeto, dentro da pasta desejada, rode no terminal os comandos a baixo:
+    docker run --rm --user "$(id -u):$(id -g)" -v $(pwd):/usr/src -w /usr/src -ti ruby:2.5.1 bash
+    gem install rails -v 5.2
+    rails new OneBitExchange --database=postgresql --skip-bundle
+    exit (sai da máquina)
+    cd OneBicExchange (entra na pasta local)
+
+  2 - Agora vamos configurar o docker, na raiz do projeto crie um arquivo chamado Dockerfile e insira o conteúdo:
+    FROM ruby:2.5.1
+  
+    # Adicionando nodejs e yarn dependencias para o frontend
+    RUN curl -sL https://deb.nodesource.com/setup_6.x | bash - && \
+    curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add - && \
+    echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
+    
+    # Instala nossas dependencias
+    RUN apt-get update && apt-get install -qq -y --no-install-recommends \
+    nodejs yarn build-essential libpq-dev imagemagick git-all nano
+    
+    # Seta nosso path
+    ENV INSTALL_PATH /onebitexchange
+    
+    # Cria nosso diretório
+    RUN mkdir -p $INSTALL_PATH
+    
+    # Seta o nosso path como o diretório principal
+    WORKDIR $INSTALL_PATH
+    
+    # Copia o nosso Gemfile para dentro do container
+    COPY Gemfile ./
+    
+    # Seta o path para as Gems
+    ENV BUNDLE_PATH /gems
+    
+    # Copia nosso código para dentro do container
+    COPY . .
+
+    Observação: Caso decida trocar o nome do workdir do dockerfile, alterar também no docker compose na linha 17.
+
+  3 - Agora crie também na raiz do projeto o arquivo docker-compose.yml e insira nele:
+    version: "3"
+    
+    services:
+      postgres:
+        image: "postgres:9.5"
+        volumes:
+          - postgres:/var/lib/postgresql/data
+    
+      app:
+        depends_on:
+          - "postgres"
+        build: .
+        command: bash start.sh
+        ports:
+          - "3000:3000"
+        volumes:
+          - .:/onebitexchange
+          - gems:/gems
+    
+    volumes:
+      postgres:
+      gems:
+
+  4 - Crie agora um arquivo chamado start.sh na raiz do projeto
+    # Instala as Gems
+    bundle check || bundle install
+
+    # Roda nosso servidor
+    bundle exec puma -C config/puma.rb
+
+  5 - Para criar nosso ambiente rode:
+    docker-compose build
+
+    Observação: Caso seus comandos docker só funcionem usando o sudo antes, rode no console os seguintes comando para concertar:
+      sudo groupadd docker
+      sudo usermod -aG docker $USER
+      sudo service docker restart
+
+-Setup inicial do projeto:
+  1 - Adicione no seu Gemfile dentro do bloco ‘group :development, :test’
+    gem 'rspec-rails', '~> 3.5'
+  
+  2 - Remova as seguintes gems do Gemfile (caso estejam presentes):
+    gem 'selenium-webdriver'
+    gem 'chromedriver-helper'
+  
+  3 - Instale as gems:
+    docker-compose run --rm app bundle install
+  
+  4 - Instale o Rspec:
+    docker-compose run --rm app bundle exec rails generate rspec:install
+
+  5 - Altere seu arquivo config/database.yml para:
+    default: &default
+      adapter: postgresql
+      encoding: unicode
+      pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+      host: postgres (mesmo nome do service do docker-compose)
+      user: postgres
+
+
+    development:
+      <<: *default
+      database: V2OneBitExchange_development
+
+
+    test:
+      <<: *default
+      database: V2OneBitExchange_test
+    
+
+    production:
+      <<: *default
+      database: V2OneBitExchange_production
+      username: OneBitExchange
+      password: <%= ENV['EXCHANGE_DATABASE_PASSWORD'] %>
+
+  6 - Vamos criar nosso database:
+    docker-compose run --rm app bundle exec rails db:create db:migrate
+
+-Token Currency Data Feed (Gerando a chave de acesso a API):
+  1 - Acesse https://currencydatafeed.com/ no seu browser e registre-se no site.
+
+  2 - Após completar o cadastro um email será enviado pra confirmar a conta, acesse seu email e confirme o registro.
+
+  3 - Após confirmar, você irá cair no dashboard, no menu lateral esquerdo clique em API, seu token vai aparecer em API Access Token.
+
+  4 - Guarde a sua chave para usar em breve.
+
+-Credentials (Gerando as credenciais):
+  1 - Vamos logar na máquina docker para abrir nosso credentials:
+    docker-compose run --rm app bash
+  
+  2 - Abra o editor:
+    EDITOR=nano bundle exec rails credentials:edit
+
+  3 - Ao abrir o editor apague o conteúdo do arquivo e cole o conteúdo a baixo usando o “ctrl + shift + v”
+    test:
+      secret_key_base: c6658efe5424dd97a9e651608915f7fd6205e4e8c8411c93657c9896279cac6625cf23cd3989c30cfebeab595f97d4deaf70e25d888bd7b71af41702e9a36ae6
+      currency_api_key: sua_api_key
+      currency_api_url: https://currencydatafeed.com/api/data.php
+
+
+    development:
+      secret_key_base: c6658efe5424dd97a9e651608915f7fd6205e4e8c8411c93657c9896279cac6625cf23cd3989c30cfebeab595f97d4deaf70e25d888bd7b71af41702e9a36ae6
+      currency_api_key: sua_api_key
+      currency_api_url: https://currencydatafeed.com/api/data.php
+
+
+    production:
+      secret_key_base: c6658efe5424dd97a9e651608915f7fd6205e4e8c8411c93657c9896279cac6625cf23cd3989c30cfebeab595f97d4deaf70e25d888bd7b71af41702e9a36ae6
+      currency_api_key: sua_api_key
+      currency_api_url: https://currencydatafeed.com/api/data.php
+
+  
+    Observação: O hash contido em secret_key_base é gerado automaticamente com o projeto, caso queira gerar um novo é só rodar o comando rake secret
+
+  4 - Agora saia da máquina docker rodando:
+    exit
+
+-Instalando as dependencias do Yarn:
+  1 - Vamos instalar o jQuery rodando:
+    docker-compose run --rm app bundle exec yarn add jquery
+
+  2 - Agora temos que importá-lo no nosso application.js, adicione a seguinte linha no seu arquivo:
+    //= require jquery
+
+  3 - Agora vamos instalar o bootstrap no nosso projeto:
+    docker-compose run --rm app bundle exec yarn add bootstrap
+
+  4 - Agora renomeie o arquivo app/assets/application.css para application.scss e substitua o conteúdo dele por (apaga tudo):
+    @import "bootstrap/dist/css/bootstrap.css";
+
+  5 - No application.js coloque:
+    //= require bootstrap/dist/js/bootstrap
+ 
+
+-Exchange Service Teste (Gerando os test da aplicação):
+  1 - Adicione ao Gemfile:
+    gem 'rest-client'
+    gem 'webmock'
+
+  2 - Instale as gems:
+    docker-compose run --rm app bundle install
+
+  3 - Crie uma pasta /spec/support e crie um arquivo api_data.rb com o conteúdo:
+    RSpec.configure do |config|
+      config.before(:each) do   
+        stub_request(:get, /currencydatafeed.com/ )
+        .with(headers: {
+          'Accept'=>'*/*'
+        }).to_return(status: 200, body: '
+          {
+            "status": true,
+            "currency": [
+              {
+                "currency": "USD/BRL",
+                "value": "3.41325",
+                "date": "2018-04-20 17:22:59",
+                "type": "original"
+              }
+            ]
+          }', headers: {})
+      end
+    end
+
+  4 - Adicione no arquivo spec_helper.rb as linhas:
+    require 'webmock/rspec'
+    WebMock.disable_net_connect!(allow_localhost: true)
+    require File.expand_path("../../config/environment", __FILE__)
+    Dir[Rails.root.join('spec/support/**/*.rb')].each { |f| require f }
+
+  5 - Agora crie uma pasta chamada /services em spec/ e dentro dela um arquivo chamado exchange_service_spec.rb:
+    require 'spec_helper'
+    require 'json'
+    require './app/services/exchange_service'
+
+    describe 'Currency' do
+      it 'exchange' do
+        amount = rand(0..9999)
+        res = ExchangeService.new("USD", "BRL", amount).perform
+        expect(res.is_a? Numeric).to eql(true)
+        expect(res != 0 || amount == 0).to eql(true)
+      end
+    end
+
+  6 - Rode o teste (irá falhar):
+    docker-compose run --rm app bundle exec rspec spec/services/exchange_service_spec.rb
+
+    Observação: Ajustar o comando de pegar as permissões do docker para incluir todos os diretórios e arquivos.
+    sudo chown -R $USER:$USER .
+
+    Observação: Ajustar o comando de pegar as permissões do docker para incluir todos os diretórios e arquivos na máquina do docker-machine. Ao alterar na máquina automaticamente altera no local.
+    sudo chown -R docker .
+
+-Exchange Service (Gerando o service que para conectar com a API):
+  1 - Dentro da sua pasta /app crie uma pasta chamada /services e dentro dele um arquivo exchange_service.rb com o seguinte conteúdo:
+    require 'rest-client'
+    require 'json'
+    
+    class ExchangeService
+      def initialize(source_currency, target_currency, amount)
+        @source_currency = source_currency
+        @target_currency = target_currency
+        @amount = amount.to_f
+      end
+    
+    
+      def perform
+        begin
+          exchange_api_url = Rails.application.credentials[Rails.env.to_sym][:currency_api_url]
+          exchange_api_key = Rails.application.credentials[Rails.env.to_sym][:currency_api_key]
+          url = "#{exchange_api_url}?token=#{exchange_api_key}&currency=#{@source_currency}/#{@target_currency}"
+          res = RestClient.get url
+          value = JSON.parse(res.body)['currency'][0]['value'].to_f
+          
+          value * @amount
+        rescue RestClient::ExceptionWithResponse => e
+          e.response
+        end
+      end
+    end
+
+  2 - Para testar no console, rode os comandos a baixo:
+    docker-compose run --rm app bundle exec rails c
+    ExchangeService.new('BRL', 'EUR', 10).perform
+
+  3 - Rode novamente o nosso teste de service:
+    docker-compose run --rm app bundle exec rspec spec/services/exchange_service_spec.rb
+
+-Exchange Request Teste (Gerando o controller e os testes):
+  1 - Rode no seu terminal:
+    docker-compose run --rm app bundle exec rails g controller Exchanges index convert --no-controller-specs
+
+  2 - Agora vamos criar o teste de request para esse controller, digite no terminal:
+    docker-compose run --rm app bundle exec rails g rspec:request exchanges
+
+  3 - No seu arquivo exchanges_spec.rb substitua o conteúdo por:
+    require 'rails_helper'
+ 
+    RSpec.describe 'Exchanges', type: :request do
+      describe 'GET #index' do
+        it 'returns http success' do
+          get '/'
+          expect(response).to have_http_status(200)
+        end
+      end
+    
+    
+      describe 'GET #convert' do
+        before do
+          @amount = rand(1..9999)
+        end
+    
+        it 'returns http success' do
+          get '/convert', params: {
+                            source_currency: "USD",
+                            target_currency: "BRL",
+                            amount: @amount
+                          }
+          expect(response).to have_http_status(200)
+        end
+      end
+    end
+
+  4 - Rode o teste:
+    docker-compose run --rm app bundle exec rspec spec/requests/exchanges_spec.rb
+
+  5 - Remova o arquivo app/views/convert.html.erb
+
+-Exchange Controller (Criando os métodos do controller exchanges):
+  1 - Altere seu routes.rb para:
+    Rails.application.routes.draw do
+      root 'exchanges#index'
+      get 'convert', to: 'exchanges#convert'
+    end
+
+  2 - No seu ExchangesController substitua o conteúdo por.
+    class ExchangesController < ApplicationController
+      def index
+      end
+    
+      def convert
+        value = ExchangeService.new(params[:source_currency], params[:target_currency], params[:amount]).perform
+        render json: {"value": value}
+      end
+    end
+
+    Observação: Também é possível testar direto no navegador, siga os passos abaixo:
+    a – Suba o servidor do rails:
+      docker-compose up
+
+    b- E cole na barra de endereços a seguinte URL:
+      http://localhost:3000/convert?source_currency=BRL&target_currency=EUR&amount=10
+
+  3 - Rode o teste de request novamente:
+    docker-compose run --rm app bundle exec rspec spec/requests/exchanges_spec.rb
+
+-Testes de sistema (Criando os testes de sistemas):
+  1 - Crie uma pasta em spec/ chamada /system, dentro dela crie um arquivo chamado exchanges_index_system_spec.rb
+
+  2 - Dentro desse arquivo coloque:
+    require 'rails_helper'
+ 
+    RSpec.describe "Exchange Currency Process", :type => :system, js: true do
+      it "show exchange value" do
+        visit '/'
+        within("#exchange_form") do
+          select('EUR', from: 'source_currency')
+          select('USD', from: 'target_currency')
+          fill_in 'amount', with: rand(1..9999)
+        end
+        click_button 'CONVERTER'
+    
+        # save_and_open_page
+        expect(page).to have_content("value")
+      end
+    end
+
+  3 - Rode o teste:
+    docker-compose run --rm app bundle exec rspec spec/system/exchanges_index_system_spec.rb
+
+  4 - Coloque no rails_helper.rb (dentro das configurações, abaixo da linha RSpec.configure do |config|):
+    config.before(:each, type: :system) do
+      driven_by :rack_test
+    end
+
+-Preparando a página index:
+  1 - Suba as imagens dos links abaixo na sua pasta public rodando:
+    curl https://onebitcode.com/wp-content/uploads/2018/06/logo.png > public/logo.png
+    curl https://onebitcode.com/wp-content/uploads/2018/06/favicon.png > public/favicon.png
+    curl https://onebitcode.com/wp-content/uploads/2018/06/background-img.jpg > public/background-img.jpg
+
+  2 - No arquivo app/views/layout/application.html.erb adicione ao header:
+    <%= favicon_link_tag '/favicon.png' %>
+
+  3 - Dentro do arquivo index.html.erb nas views do Exchange coloque:
+    <div class='container'>
+      <div class='row main'>
+        <div class='col-lg-3 offset-lg-1 col-md-10 offset-md-1 exchange_box'>
+          <div class='row'>
+              <div class='col-md-8 offset-md-2 text-sm-center'>
+                <%= image_tag '/logo.png', class: 'img-fluid'%>
+              </div>
+          </div>
+    
+          <div class='row'>
+            <%= render 'exchange_box' %>
+          </div>
+        </div>
+    
+        <div class='col-lg-7 offset-lg-1 hidden-sm-down title-box'>
+          <div class='row'>
+            <h2 class='subtitle'>Converta facilmente suas Moedas</h2>
+          </div>
+                    
+          <div class='row'>
+            <h3 class='subtitle'>Para qualquer moeda no Mundo!</h3>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  4 - Altere seu arquivo exchanges.scss para:
+    body {
+      background: image-url("/background-img.jpg") no-repeat center center fixed;
+      -webkit-background-size: cover;
+      -moz-background-size: cover;
+      -o-background-size: cover;
+      background-size: cover;
+    }
+    
+    .main{
+      margin-top: 50px;
+    }
+    
+    
+    .title-box{
+      margin-top: 20%;
+    
+      .title{
+        color: white;
+        text-shadow: 2px 0px 2px #000000;
+      }
+    
+      .subtitle{
+        color: white;
+        text-shadow: 3px 0px 3px #000000;
+        font-size: 30px;
+        margin-left: 10px;
+        margin-right: 10px;
+      }
+    }
+    
+    
+    .exchange_box{
+      margin: 10px auto;
+      .logo-box{
+        margin: 0 auto;
+        padding-bottom: 10px;
+      }
+    }
+
+  5 - No arquivo app/assets/stylesheets/application.scss coloque:
+    @import 'exchanges';
+
+  6 - Dentro da pasta views/exchanges crie um arquivo chamado _exchange_box.html.erb e coloque nele:
+    <div class='exchange_box col-sm-12'>
+      <div class='card'>
+    
+        <div class='card-header text-center'>
+          Simule sua conversão
+        </div>
+    
+        <div class='card-block'>
+          <%= form_tag('/convert', method: :get, id: 'exchange_form') do %>
+            <div class='local_currency'>
+              <div class='form-group'>
+                <p class='title'>Moeda Local</p>
+                <%= select_tag 'source_currency', options_for_select(currency_list, 'BRL'), class: 'form-control', id: 'source_currency' %>
+              </div>
+    
+              <div class='form-group'>
+                <input type='number' name='amount' id='amount' class='form-control' placeholder='Quantidade ($10)' step='any' required>
+              </div>
+            </div>
+                        
+            <div class='destination_currency'>
+              <div class='form-group'>
+                <p class='title'>Moeda Pretendida</p>
+                <%= select_tag 'target_currency', options_for_select(currency_list, 'EUR'), class: 'form-control', id: 'target_currency'%>
+              </div>
+              <div class='form-group'>
+                <input type='text' id='result' name='result' class='form-control' placeholder='Resultado' readonly>
+              </div>
+            </div>
+            <div>
+              <button type='submit' class='btn btn-primary btn-exchange col-md-12'>CONVERTER</button>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+
+  7 - Crie um arquivo _exchange_box.scss em app/stylesheets/ e coloque dentro dele:
+    .exchange_box{
+ 
+      .card{
+        border: 0;
+    
+        .card-header{
+          background-color: #878d99;
+          border-radius: 0;
+          color: white;
+          font-weight: 700;
+        }
+    
+        .card-block{
+          padding-top: 10px;
+          padding: 20px;
+    
+          .title{
+            color: #878d99;
+            font-weight: 700;
+          }
+    
+          .btn-exchange{
+            background-color: #5bc0de;
+            border-color: #5bc0de;
+            border-radius: 0;
+          }
+        }
+      }
+    }
+    
+    @media only screen and (max-width : 992px) {
+      .card-header {
+        font-size: 25px;
+      }
+    
+      .title{
+        margin-top: 30px;
+        font-size: 20px;
+      }
+        
+      .form-group {
+        select {
+          font-size: 20px;
+          height: 50px !important;
+        }
+    
+        input {
+          font-size: 20px;
+          height: 50px;
+        }
+      }
+    
+    
+      #result {
+        margin-bottom: 20px;
+      }
+    
+      .btn-exchange {
+        font-size: 20px;
+      }
+    }
+
+  8 - Insira no seu application.scss:
+    @import '_exchange_box';
+
+  9 - Atualize o conteúdo do helper _exchanges_helper.rb com o seguinte conteúdo:
+    module ExchangesHelper
+      def currency_list
+        [
+          'AUD', 'BGN', 'BRL', 'CAD', 'CHF', 'CNY', 'CZK', 'DKK', 'EUR', 'GBP',
+          'HKD', 'HRK', 'HUF', 'IDR', 'ILS', 'INR', 'JPY', 'KRW', 'MXN',
+          'MYR', 'NOK', 'NZD', 'PHP', 'PLN', 'RON', 'RUB', 'SEK', 'SGD',
+          'THB', 'TRY', 'USD', 'ZAR'
+        ]
+      end
+    end
+
+    Observação: Esse helper já foi criado antes com o generate do controller.
+
+  10 - Para implementar a responsividade no site, atualize o application.html.erb colocando:
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>OneBitExchangeDev</title>
+        <%= csrf_meta_tags %>
+        <%= csp_meta_tag %>
+    
+        <%= stylesheet_link_tag 'application', media: 'all', 'data-turbolinks-track': 'reload' %>
+        <%= javascript_include_tag 'application', 'data-turbolinks-track': 'reload' %>
+        <%= favicon_link_tag '/favicon.png' %>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      </head>
+    
+      <body>
+        <%= yield %>
+      </body>
+    </html>
+
+  11 - Rode o teste:
+    docker-compose run --rm app bundle exec rspec spec/system/exchanges_index_system_spec.rb
+
+-Incluindo o CoffeeScript:
+  1 - No arquivo app/assets/javascripts/exchanges.coffee coloque o seguinte conteúdo nele:
+    $(document).ready ->
+      $('form').submit ->
+        if $('form').attr('action') == '/convert'
+          $.ajax '/convert',
+              type: 'GET'
+              dataType: 'json'
+              data: {
+                      source_currency: $("#source_currency").val(),
+                      target_currency: $("#target_currency").val(),
+                      amount: $("#amount").val()
+                    }
+              error: (jqXHR, textStatus, errorThrown) ->
+                alert textStatus
+              success: (data, text, jqXHR) ->
+                $('#result').val(data.value)
+            return false;
+
+-Continuos Integration:
+  1 - Visite o codeship: http://codeship.com
+
+  2 - Crie uma conta com o seu github
+
+  3 - Clique em projects e depois em New Project
+
+  4 - Escolha a plataforma desejada (github, bitbucket, gitlab)
+
+  5 - Em Repository, clique em given us the proper permission para permitir que o codeship tenha as permissões para ler seu repositório.
+
+  6 - Escolha seu repositório em Only select repositories
+  
+  7 - Agora já com as permissões de leitura, selecione a github organization e o repositório
+  
+  8 - Clique em “Select Basic project”
+  
+  9 - Em “Select your technology to pre populate basic commands” escolha Ruby on Rails
+  
+  10 - Descomente a linha # rvm use 2.2.3 –install e ajuste para rvm use 2.5.1 que é a mesma versão do ruby utilizada no nosso Dockerfile
+  
+  11 - Inclua abaixo da linha bundle install o seguinte conteúdo
+    yarn
+    bundle exec rails assets:precompile
+  
+  12 - Adicione uma pipeline chamada test
+  
+  13 - Agora salve as configurações.
+  
+  14 - Agora vá até as configurações do seu projeto no codeship.
+  
+  15 - Clique em settings e depois em tests.
+  
+  16 - Ajuste a test pipeline para executar:
+    bundle exec rails spec
+  
+  17 - Salve as configurações
+  
+  18 - Volte novamente as configurações do projeto.
+  
+  19 - No menu superior clique em “Environment”
+  
+  20 - Inclua uma variável de ambiente chamada RAILS_MASTER_KEY com o valor do seu arquivo config/master.key
+  
+  21 - Salve as configurações
+  
+  22 - Agora vá mais uma vez até as configurações do seu projeto no codeship.
+  
+  23 - Clique em settings e depois em deploy.
+  
+  24 - No campo “Enter branch name” coloque master depois clique em “Save pipeline settings”
+  
+  25 - Escolha a opção heroku (mantenha essa página aberta para a próxima aula).
+  
+  26 - De volta ao código do projeto Inclua a versão do node no package.json
+    {
+      "engines" : { "node" : ">=6" },
+      "name": "OneBitExchange",
+      "private": true,
+      "dependencies": {
+        "bootstrap": "^4.3.1",
+        "jquery": "^3.4.1"
+      }
+    }
+  
+  27 - Faça um push para o master do seu projeto e observe os comandos sendo rodados no painel do codeship como no vídeo.
+  
+  28 - Pronto, continuamos na parte de deploy
+
+-Deploy:
+  1 - Rode no seu console:
+    docker-compose run --rm app yarn add tether
+
+  2 - Atualize os eu app/assets/javascripts/application.js colocando:
+    //= require jquery
+    //= require tether/dist/js/tether
+    //= require bootstrap/dist/js/bootstrap.bundle
+    //= require rails-ujs
+    //= require activestorage
+    //= require turbolinks
+    //= require_tree .
+    
+  3 - Adicione ou substitua a linha config.assets.compile = false por config.assets.compile = true
+
+  4 - Visite http://heroku.com e crie uma conta
+
+  5 - No seu Dashboard clique em New e depois em “Create new APP”
+
+  6 - Dê um nome ao seu APP e depois clique em “Create APP”
+
+  7 - Clique em Settings, e na sessão Buildpacks adicione dois buildpacks nessa ordem: heroku/nodejs e heroku/ruby
+
+  8 - Na sessão Config Vars clique em Reveal Config Vars
+
+  9 - Agora crie uma varável de ambiente chamada RAILS_MASTER_KEY e coloque no valeu dela o conteúdo do seu arquivo config/master.key
+
+  10 - Visite https://dashboard.heroku.com/account e vá até a parte “API Key”, clique em Reveal e copie a chave.
+
+  11 - Agora volte a página do codeship aberta, coloque o nome do seu APP do heroku e a chave e clique em confirmar.
+
+  12 - Agora faça o push para o master do seu projeto e vá ao painel do seu APP no codeship acompanhar os comandos rodando.
