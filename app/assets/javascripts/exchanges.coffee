@@ -1,5 +1,7 @@
 $(document).ready ->
-  $('.convert').on 'keyup change', ->
+  $("#invert").click () ->
+    $(".destination_currency").show()
+
     $.ajax '/convert',
         type: 'POST'
         dataType: 'json'
@@ -14,19 +16,14 @@ $(document).ready ->
           $('#result').val(data.value)
       return false;
 
-  $("#invert").click () ->
-    source_currency = $("#source_currency").val()
-    target_currency = $("#target_currency").val()
-    
-    $("#source_currency").val(target_currency)
-    $("#target_currency").val(source_currency)
+  $("#bitcoin-invert").click () ->
+    $(".destination_currency").hide()
 
-    $.ajax '/convert',
+    $.ajax '/convert_bitcoin',
         type: 'POST'
         dataType: 'json'
         data: {
                 source_currency: $("#source_currency").val(),
-                target_currency: $("#target_currency").val(),
                 amount: $("#amount").val()
               }
         error: (jqXHR, textStatus, errorThrown) ->
